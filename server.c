@@ -29,7 +29,7 @@ int main(int argc, char *argv[])
     fd_set readfds;
 
     // a message
-    char *message = "ECHO Daemon v1.0 \r\n";
+    char *message = "ECHO Daemon v1.0 \r\nEnter --exit To Close The Connection\n\n";
 
     // initialise all client_socket[] to 0 so not checked
     for (i = 0; i < max_clients; i++)
@@ -167,8 +167,7 @@ int main(int argc, char *argv[])
                     close(sd);
                     client_socket[i] = 0;
                 }
-
-                // Echo back the message that came in
+                // Send message to Other Clients
                 else
                 {
                     // set the string terminating NULL byte on the end
@@ -176,21 +175,38 @@ int main(int argc, char *argv[])
                     buffer[valread] = '\0';
                     // send(sd, buffer, strlen(buffer), 0);
                     int temp_sd;
-                    for (i = 0; i < max_clients; i++)
+                    char msg[255] = "";
+                    char client_dets[50];
+                    getpeername(sd, (struct sockaddr *)&address, (socklen_t *)&addrlen);
+                    sprintf(client_dets, "(Message from (Port: %d, Host: %s)\n", ntohs(address.sin_port), inet_ntoa(address.sin_addr));
+                    strncat(msg, client_dets, 55);
+                    strncat(msg, buffer, strlen(buffer));
+                    strncat(msg, "\n\n", 4);
+
+                    char *ptr = strstr(msg, "--exit");
+                    if (ptr != NULL)
                     {
-                        char msg[255] = "";
-                        temp_sd = client_socket[i];
-                        if (temp_sd != sd)
+                        char ext_msg[255];
+                        sprintf(ext_msg, "Client (Host: %s, Port: %d) Left\n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
+                        close(sd);
+                        client_socket[i] = 0;
+                        for (i = 0; i < max_clients; i++)
                         {
-                            // strncat(msg, "Coming From Client: \n", 20);
-                            strncat(msg, buffer, strlen(buffer));
-                            send(temp_sd, msg, strlen(msg), 0);
-                            // getpeername(sd, (struct sockaddr *)&address, (socklen_t *)&addrlen);
-                            // printf("Host is , ip %s , port %d \n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
-                            // continue;
+                            int temp_sd = client_socket[i];
+                            send(temp_sd, ext_msg, strlen(ext_msg), 0);
                         }
-                        // puts(msg);
-                        // send(temp_sd, msg, strlen(msg), 0);
+                    }
+                    else
+                    {
+                        for (i = 0; i < max_clients; i++)
+                        {
+                            temp_sd = client_socket[i];
+
+                            if (temp_sd != sd)
+                            {
+                                send(temp_sd, msg, strlen(msg), 0);
+                            }
+                        }
                     }
                 }
             }
