@@ -10,20 +10,21 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/time.h> //FD_SET, FD_ISSET, FD_ZERO macros
-#include <pthread.h>
+#include <ctype.h>
 
 #define TRUE 1
 #define FALSE 0
 #define PORT 8888
 
-
-struct User {
+struct User
+{
     char name[20];
 };
 
 struct User Users[25];
 
-void* saveUser(void *);
+void saveUser(int);
+void split_string(char *, char *, char **, char **);
 
 int main(int argc, char *argv[])
 {
@@ -133,8 +134,7 @@ int main(int argc, char *argv[])
 
             // inform user of socket number - used in send and receive commands
             printf("New connection , socket fd is %d , ip is : %s , port : %d \n ", new_socket, inet_ntoa(address.sin_addr), ntohs(address.sin_port));
-            pthread_t temp_thread_id;
-            pthread_create(&temp_thread_id, NULL, saveUser, (void *)&new_socket);
+            saveUser(new_socket);
 
             // send new connection greeting message
             if (send(new_socket, message, strlen(message), 0) != strlen(message))
@@ -151,7 +151,7 @@ int main(int argc, char *argv[])
                 if (client_socket[i] == 0)
                 {
                     client_socket[i] = new_socket;
-                    printf("Adding to list of sockets as %d\n", i);
+                    printf("Adding %s to list of sockets as %d\n", Users[new_socket].name, i);
 
                     break;
                 }
@@ -190,16 +190,20 @@ int main(int argc, char *argv[])
                     char msg[255] = "";
                     char client_dets[50];
                     getpeername(sd, (struct sockaddr *)&address, (socklen_t *)&addrlen);
-                    sprintf(client_dets, "(Message from (Port: %d, Host: %s)\n", ntohs(address.sin_port), inet_ntoa(address.sin_addr));
+                    sprintf(client_dets, "Message from %s: \n", Users[sd].name);
                     strncat(msg, client_dets, 55);
                     strncat(msg, buffer, strlen(buffer));
                     strncat(msg, "\n\n", 4);
 
-                    char *ptr = strstr(msg, "--exit");
-                    if (ptr != NULL)
+                    char confirm_msg[] = "Message Sent!!\n\n";
+
+                    char *ext_ptr = strstr(msg, "--exit");
+                    char *list_ptr = strstr(msg, "--list");
+                    char *priv_ptr = strstr(msg, "--priv");
+                    if (ext_ptr != NULL)
                     {
                         char ext_msg[255];
-                        sprintf(ext_msg, "Client (Host: %s, Port: %d) Left\n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
+                        sprintf(ext_msg, "Client %s Left\n\n", Users[sd].name);
                         close(sd);
                         client_socket[i] = 0;
                         for (i = 0; i < max_clients; i++)
@@ -208,9 +212,48 @@ int main(int argc, char *argv[])
                             send(temp_sd, ext_msg, strlen(ext_msg), 0);
                         }
                     }
+                    else if (list_ptr != NULL)
+                    {
+                        char lst_msg[300] = "\nAll Currently Connected Clients: \n";
+                        char lst_single[25];
+                        for (i = 4; i < (max_sd + 1); i++)
+                        {
+                            sprintf(lst_single, "> %s\n", Users[i].name);
+                            strncat(lst_msg, lst_single, 20);
+                        }
+                        strncat(lst_msg, "\n", 2);
+                        send(sd, lst_msg, strlen(lst_msg), 0);
+                    }
+                    else if (priv_ptr != NULL)
+                    {
+                        char *priv_msg;
+                        char *username;
+                        int priv_sd = 0;
+                        char delim[] = "--priv";
+                        split_string(msg, delim, &priv_msg, &username);
+                        for (i = 4; i < (max_sd + 1); i++)
+                        {
+                            if (strcmp(username, Users[i].name) == 0)
+                            {
+                                priv_sd = i;
+                            }
+                        }
+                        if (priv_sd == 0)
+                        {
+                            char no_priv_msg[100];
+                            sprintf(no_priv_msg, "\nNo User Found with Username: %s\nPlease check(using --list command) and try again\n\n", username);
+                            send(sd, no_priv_msg, strlen(no_priv_msg), 0);
+                        }
+                        else
+                        {
+                            char fin_priv_msg[275];
+                            sprintf(fin_priv_msg, "Private %s\n\n", priv_msg);
+                            send(priv_sd, fin_priv_msg, strlen(fin_priv_msg), 0);
+                            send(sd, confirm_msg, strlen(confirm_msg), 0);
+                        }
+                    }
                     else
                     {
-                        char confirm_msg[] = "Message Sent!!\n";
                         for (i = 0; i < max_clients; i++)
                         {
                             temp_sd = client_socket[i];
@@ -230,13 +273,38 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-void* saveUser(void * sd_ptr)
+void saveUser(int sd)
 {
-    int sd = *(int *)sd_ptr;
     char msg[] = "\nPlease Input Your Username (This will be visible to other clients): ";
     char uname[20];
     send(sd, msg, strlen(msg), 0);
     int k = read(sd, uname, 10);
-    uname[k-2] = '\0';
+    uname[k - 2] = '\0';
     strncpy(Users[sd].name, uname, 20);
+}
+
+void split_string(char *input_string, char *delimiter, char **message, char **username)
+{
+    char *start = input_string;
+    char *end;
+
+    if ((end = strstr(start, delimiter)) != NULL)
+    {
+        int size = end - start;
+        *message = (char *)malloc(sizeof(char) * (size + 1));
+        memcpy(*message, start, size);
+        (*message)[size] = '\0';
+        start = end + strlen(delimiter);
+        int i = 0;
+        while (isspace(start[i]))
+            i++;
+        start = start + i;
+        int j = strlen(start) - 1;
+        while (isspace(start[j]))
+            j--;
+        int username_size = j + 1;
+        *username = (char *)malloc(sizeof(char) * (username_size + 1));
+        memcpy(*username, start, username_size);
+        (*username)[username_size] = '\0';
+    }
 }
